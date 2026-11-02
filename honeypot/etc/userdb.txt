@@ -1,0 +1,2 @@
+root:x:123456
+admin:x:admin

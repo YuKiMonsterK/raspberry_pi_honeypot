@@ -1,0 +1,7 @@
+*.log
+*.json
+!dashboard/mock_cowrie.json
+__pycache__/
+venv/
+.env
+.DS_Store
