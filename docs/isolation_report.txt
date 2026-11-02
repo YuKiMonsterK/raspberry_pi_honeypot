@@ -1,0 +1,122 @@
+
+════════════════════════════════════════════════════════════════
+   🛡  Cowrie 蜜罐 ‧ 防跳板隔離驗證報告
+════════════════════════════════════════════════════════════════
+  時間    2026-11-02 16:12:48 GMT
+  主機    raspberrypi（aarch64）
+  核心    6.18.50+rpt-rpi-2712
+  管理 SSH 22222（僅限 Tailscale）｜蜜罐埠：22
+  主機 80/443 白名單：開啟（apt / Tailscale 需要）
+
+ 【1】主機本身的出站限制（Host Egress）
+────────────────────────────────────────────────────────────────
+  PASS  1.1  主機 Ping 外部 IP 8.8.8.8
+        預期：被阻斷  │  實際：無法連線（已阻斷）
+  PASS  1.2  主機 TCP 直連 8.8.8.8:853（非白名單埠）
+        預期：被阻斷  │  實際：無法連線（已阻斷）
+  WARN  1.3  主機 curl 外部網頁 http://1.1.1.1
+        預期：放行（白名單，供 apt/Tailscale）  │  實際：白名單已開卻連不上，請檢查網路
+
+ 【2】蜜罐容器的出站限制（防跳板核心）
+────────────────────────────────────────────────────────────────
+  容器 cowrie｜網路：honeypot_default
+
+  PASS  2.1  容器 Ping 外部 IP 8.8.8.8
+        預期：被阻斷  │  實際：無法連線（已阻斷）
+  PASS  2.2  容器 wget 外部網頁 http://1.1.1.1
+        預期：被阻斷  │  實際：無法連線（已阻斷）
+  PASS  2.3  Cowrie 容器內直連 1.1.1.1:443（模擬攻擊者跳板）
+        預期：被阻斷  │  實際：無法連線（已阻斷）
+
+ 【3】內部 DNS 與 NTP（被放行的必要服務應正常運作）
+────────────────────────────────────────────────────────────────
+  INFO  3.0  目前使用的 DNS 伺服器
+        預期：—  │  實際：100.100.100.100 fd7a:115c:a1e0::53 
+  PASS  3.1  DNS 解析 deb.debian.org
+        預期：可正常解析  │  實際：199.232.114.132
+  PASS  3.2  DNS 解析 example.com
+        預期：可正常解析  │  實際：104.20.23.154
+  PASS  3.3  NTP 時間同步
+        預期：已同步  │  實際：NTPSynchronized=yes
+  INFO  3.4  容器 DNS/NTP 出站
+        預期：—  │  實際：已關閉（預設最嚴格，容器無法解析外部網域）
+
+ 【4】防火牆規則清單與狀態檢查
+────────────────────────────────────────────────────────────────
+  PASS  4.1  UFW 防火牆
+        預期：啟用中  │  實際：Status: active
+  PASS  4.2  預設入站政策
+        預期：deny（拒絕）  │  實際：deny (incoming)
+  PASS  4.3  預設出站政策（防跳板）
+        預期：deny（拒絕）  │  實際：deny (outgoing)
+  PASS  4.4  管理 SSH 放行規則（Port 22222）
+        預期：存在  │  實際：已放行
+  PASS  4.5  管理 SSH 監聽狀態
+        預期：Port 22222 監聽中  │  實際：監聽中
+  PASS  4.6  蜜罐埠（22）監聽狀態
+        預期：監聽中（誘捕用）  │  實際：監聽中
+  PASS  4.7  DOCKER-USER 已掛載蜜罐出站過濾鏈
+        預期：已掛載  │  實際：HONEYPOT-EGRESS 生效中
+  PASS  4.8  重開機後自動套用（honeypot-egress.service）
+        預期：enabled  │  實際：enabled
+  PASS  4.9  DROP 計數器（證據）
+        預期：測試期間封包數增加  │  實際：+10 個封包被 DROP 規則攔截
+
+  ▌UFW 規則清單
+    Status: active
+    
+         To                         Action      From
+         --                         ------      ----
+    [ 1] Anywhere on lo             ALLOW IN    Anywhere                  
+    [ 2] Anywhere                   ALLOW OUT   Anywhere on lo             (out)
+    [ 3] 22222/tcp on tailscale0    ALLOW IN    Anywhere                   # Admin SSH via Tailscale
+    [ 4] 22/tcp                     ALLOW IN    Anywhere                   # Cowrie honeypot
+    [ 5] 8501/tcp on tailscale0     ALLOW IN    Anywhere                   # Streamlit via Tailscale
+    [ 6] 53/udp                     ALLOW OUT   Anywhere                   (out) # DNS
+    [ 7] 53/tcp                     ALLOW OUT   Anywhere                   (out) # DNS (TCP)
+    [ 8] 123/udp                    ALLOW OUT   Anywhere                   (out) # NTP
+    [ 9] 67/udp                     ALLOW OUT   Anywhere                   (out) # DHCP client
+    [10] 3478/udp                   ALLOW OUT   Anywhere                   (out) # Tailscale STUN
+    [11] Anywhere                   ALLOW OUT   41641/udp                  (out) # Tailscale WireGuard
+    [12] 80,443/tcp                 ALLOW OUT   Anywhere                   (out) # HTTP/HTTPS (apt, docker pull, Tailscale)
+    [13] Anywhere (v6) on lo        ALLOW IN    Anywhere (v6)             
+    [14] Anywhere (v6)              ALLOW OUT   Anywhere (v6) on lo        (out)
+    [15] 22222/tcp (v6) on tailscale0 ALLOW IN    Anywhere (v6)              # Admin SSH via Tailscale
+    [16] 22/tcp (v6)                ALLOW IN    Anywhere (v6)              # Cowrie honeypot
+    [17] 8501/tcp (v6) on tailscale0 ALLOW IN    Anywhere (v6)              # Streamlit via Tailscale
+    [18] 53/udp (v6)                ALLOW OUT   Anywhere (v6)              (out) # DNS
+    [19] 53/tcp (v6)                ALLOW OUT   Anywhere (v6)              (out) # DNS (TCP)
+    [20] 123/udp (v6)               ALLOW OUT   Anywhere (v6)              (out) # NTP
+    [21] 67/udp (v6)                ALLOW OUT   Anywhere (v6)              (out) # DHCP client
+    [22] 3478/udp (v6)              ALLOW OUT   Anywhere (v6)              (out) # Tailscale STUN
+    [23] Anywhere (v6)              ALLOW OUT   41641/udp (v6)             (out) # Tailscale WireGuard
+    [24] 80,443/tcp (v6)            ALLOW OUT   Anywhere (v6)              (out) # HTTP/HTTPS (apt, docker pull, Tailscale)
+    
+
+  ▌HONEYPOT-EGRESS 鏈（容器流量過濾，含封包計數）
+    Chain HONEYPOT-EGRESS (1 references)
+    num   pkts bytes target     prot opt in     out     source               destination         
+    1        0     0 RETURN     all  --  *      *       0.0.0.0/0            0.0.0.0/0            ctstate RELATED,ESTABLISHED
+    2        0     0 RETURN     all  --  docker0 docker0  0.0.0.0/0            0.0.0.0/0           
+    3        0     0 RETURN     all  --  br-+   br-+    0.0.0.0/0            0.0.0.0/0           
+    4        0     0 LOG        all  --  docker0 *       0.0.0.0/0            0.0.0.0/0            limit: avg 6/min burst 10 LOG flags 0 level 4 prefix "HONEYPOT-EGRESS-DROP: "
+    5        0     0 DROP       all  --  docker0 *       0.0.0.0/0            0.0.0.0/0           
+    6       20  1248 LOG        all  --  br-+   *       0.0.0.0/0            0.0.0.0/0            limit: avg 6/min burst 10 LOG flags 0 level 4 prefix "HONEYPOT-EGRESS-DROP: "
+    7       20  1248 DROP       all  --  br-+   *       0.0.0.0/0            0.0.0.0/0           
+    8        0     0 RETURN     all  --  tailscale0 *       0.0.0.0/0            0.0.0.0/0           
+    9        0     0 RETURN     tcp  --  *      *       0.0.0.0/0            0.0.0.0/0            ctstate DNAT ctorigdstport 22
+    10       0     0 LOG        all  --  *      *       0.0.0.0/0            0.0.0.0/0            ctstate DNAT limit: avg 6/min burst 10 LOG flags 0 level 4 prefix "DOCKER-PUBLISHED-BLOCKED: "
+    11       0     0 DROP       all  --  *      *       0.0.0.0/0            0.0.0.0/0            ctstate DNAT
+
+════════════════════════════════════════════════════════════════
+   📋 測試總結
+════════════════════════════════════════════════════════════════
+   ✔ 通過 PASS : 17
+   ✘ 失敗 FAIL : 0
+   ⚠ 警告 WARN : 1
+   ⏭ 略過 SKIP : 0
+   共計 18 項（另有 2 項資訊 INFO）
+────────────────────────────────────────────────────────────────
+    ⚠ 結論：未發現缺口，但有項目無法完整驗證（見 WARN/SKIP）
+════════════════════════════════════════════════════════════════
+
