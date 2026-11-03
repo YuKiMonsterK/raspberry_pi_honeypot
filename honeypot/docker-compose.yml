@@ -2,7 +2,7 @@ services:
   cowrie:
     image: cowrie/cowrie:latest
     container_name: cowrie
-    restart: unless-stopped
+    restart: always
     ports:
       - "22:2222"
     volumes:
